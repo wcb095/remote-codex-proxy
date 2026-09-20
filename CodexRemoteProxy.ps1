@@ -8,7 +8,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 
-$ToolVersion = '2.0.0'
+$ToolVersion = '2.1.0'
 $ToolName = 'CodexRemoteSystemProxy'
 $TargetHost = 'chatgpt.com'
 $TargetPort = 443
@@ -300,11 +300,6 @@ function Get-StartupValue {
     return [string]$property.Value
 }
 
-function Set-StartupValue([string]$Value) {
-    New-Item -Path $RunKey -Force | Out-Null
-    Set-ItemProperty -Path $RunKey -Name $RunName -Value $Value
-}
-
 function Remove-StartupValue {
     Remove-ItemProperty -Path $RunKey -Name $RunName -ErrorAction SilentlyContinue
 }
@@ -322,11 +317,6 @@ function Install-ProgramFiles {
     if ([IO.Path]::GetFullPath($sourceTunnel) -ne [IO.Path]::GetFullPath($installedTunnel)) {
         Copy-Item -LiteralPath $sourceTunnel -Destination $installedTunnel -Force
     }
-}
-
-function Get-InstalledStartupCommand {
-    $installedScript = Join-Path $InstallRoot 'CodexRemoteProxy.ps1'
-    return "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$installedScript`" -Action Start"
 }
 
 function Test-ControllerConfigured {
@@ -513,7 +503,6 @@ function Enable-ControllerMode {
         if (-not $hadManagedListener) { throw "$ListenHost`:$ListenPort is occupied by unrelated PID $($listener.OwningProcess)." }
     }
     $hadHosts = Test-ManagedHostsEntry
-    $oldStartup = Get-StartupValue
     $hadState = Test-Path -LiteralPath $ControllerStateFile
     $oldStateBytes = if ($hadState) { [IO.File]::ReadAllBytes($ControllerStateFile) } else { $null }
 
@@ -536,14 +525,14 @@ function Enable-ControllerMode {
         Start-Tunnel
         if (-not (Test-TlsTunnel)) { throw 'TLS verification through the system proxy failed.' }
         Set-HostsMapping $true
-        Set-StartupValue (Get-InstalledStartupCommand)
+        Remove-StartupValue
         ipconfig.exe /flushdns | Out-Null
     } catch {
         $failure = $_
         try {
             Stop-Tunnel
             Set-HostsMapping $hadHosts
-            if ($null -ne $oldStartup) { Set-StartupValue $oldStartup } else { Remove-StartupValue }
+            Remove-StartupValue
             if ($hadState) { [IO.File]::WriteAllBytes($ControllerStateFile, $oldStateBytes) } else { Remove-Item -LiteralPath $ControllerStateFile -Force -ErrorAction SilentlyContinue }
             if ($hadManagedListener -and $hadState) { Start-Tunnel }
             ipconfig.exe /flushdns | Out-Null
@@ -551,7 +540,7 @@ function Enable-ControllerMode {
         throw $failure
     }
 
-    Write-Step 'Controller forced mode enabled. Keep Clash System Proxy on; TUN may remain off.'
+    Write-Step 'Controller forced mode enabled for this session. Login startup is disabled; use -Action Start whenever remote access is needed.'
 }
 
 function Disable-ControllerMode {
@@ -689,7 +678,7 @@ function Show-Status {
         [pscustomobject]@{ Check = 'System proxy'; Status = if ($proxyReady) { 'OK' } else { 'NOT READY' }; Details = $proxyDisplay },
         [pscustomobject]@{ Check = 'TUN adapter'; Status = if ($tunUp) { 'ON' } else { 'OFF' }; Details = 'TUN is optional' },
         [pscustomobject]@{ Check = 'Controller hosts'; Status = if ($hostsInstalled) { 'OK' } else { 'OFF' }; Details = $TargetHost },
-        [pscustomobject]@{ Check = 'Controller startup'; Status = if ($startupValue) { 'OK' } else { 'OFF' }; Details = [string]$startupValue },
+        [pscustomobject]@{ Check = 'Controller startup'; Status = if ($startupValue) { 'REMOVE' } else { 'OFF' }; Details = if ($startupValue) { [string]$startupValue } else { 'On-demand only' } },
         [pscustomobject]@{ Check = 'Controller tunnel'; Status = if ($managedListener -and $tlsReady) { 'OK' } elseif ($managedListener) { 'TLS FAILED' } else { 'OFF' }; Details = "$ListenHost`:$ListenPort" },
         [pscustomobject]@{ Check = 'Host HTTPS_PROXY'; Status = if ($userProxy) { 'SET' } else { 'OFF' }; Details = [string]$userProxy },
         [pscustomobject]@{ Check = 'Host feature'; Status = if ($featureDisplay -match '=\s*true') { 'SET' } else { 'OFF' }; Details = $featureDisplay },
@@ -782,7 +771,11 @@ try {
         'EnableHost' { Enable-HostMode }
         'DisableHost' { Disable-HostMode }
         'Status' { Show-Status }
-        'Start' { Start-Tunnel }
+        'Start' {
+            Remove-StartupValue
+            Start-Tunnel
+            Write-Step 'Controller tunnel started on demand. No login startup entry was created.'
+        }
         'Stop' { Stop-Tunnel }
         'SelfTest' { Invoke-SelfTest }
     }

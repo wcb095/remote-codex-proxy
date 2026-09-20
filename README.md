@@ -54,7 +54,7 @@ chatgpt.com:443
 - 自动查找系统 Node.js 或 Codex 自带 Node.js；
 - 仅在回环地址 `127.0.0.1:443` 监听；
 - 只向 hosts 增加带 `# CodexRemoteProxyTool` 标记的一行；
-- 创建当前用户登录启动项；
+- 不创建登录启动项、计划任务或 Windows 服务；需要远控时按需启动；
 - 在修改 hosts 前保存备份；
 - 写 hosts 前完成代理连通和 TLS 握手验证。
 
@@ -96,14 +96,25 @@ respect_system_proxy = true # CodexRemoteProxyTool
 3. 根据电脑角色选择控制端强制模式或被控端轻量模式；
 4. 控制端模式修改 hosts 时会出现 UAC，请核对后确认；
 5. 被控端轻量模式启用后，完全退出并重新启动 Codex；
-6. 使用菜单中的“检查状态”确认结果；
-7. 需要恢复时，选择对应模式的撤销项。
+6. 以后需要远控时，选择“立即启动控制端隧道”；不使用时可选择“停止控制端隧道”；
+7. 使用菜单中的“检查状态”确认结果；
+8. 需要恢复时，选择对应模式的撤销项。
+
+控制端首次启用后，后续需要连接时只需运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Start
+```
+
+`Start` 只启动当前会话所需的本地隧道，不会创建登录启动项。完全不再需要时可使用 `-Action Stop` 暂停隧道，或使用 `DisableController` 同时撤销 hosts 等控制端配置。
 
 也可以直接使用 PowerShell：
 
 ```powershell
 # 控制端强制模式
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action EnableController
+powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Start
+powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Stop
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action DisableController
 
 # 被控端轻量模式
@@ -183,7 +194,7 @@ The tool refuses to enable both modes on the same computer.
 
 This mode maps `chatgpt.com` to loopback, listens on `127.0.0.1:443`, and forwards encrypted TLS bytes through the current Windows HTTP proxy using CONNECT. It never terminates TLS and does not log credentials, chats, project files, or Remote Control payloads.
 
-It automatically detects the system proxy and Node.js, verifies the proxy and TLS path before editing hosts, backs up hosts, installs a per-user startup entry, and removes only tool-owned changes during disablement.
+It automatically detects the system proxy and Node.js, verifies the proxy and TLS path before editing hosts, and backs up hosts. It does not install a login startup entry, scheduled task, or Windows service. Run `-Action Start` whenever remote access is needed.
 
 ### Host light mode
 
@@ -197,13 +208,22 @@ Completely exit Codex, including background processes, and restart it after enab
 2. Keep `remote-codex-proxy.cmd`, `CodexRemoteProxy.ps1`, and `tunnel.cjs` together.
 3. Double-click `remote-codex-proxy.cmd`.
 4. Select the mode matching this computer's role.
-5. Use **Show status** to verify the result.
-6. Use the matching disable option to restore the previous configuration.
+5. Later, select **Start controller tunnel now** whenever remote access is needed, and **Stop controller tunnel** when it is no longer needed.
+6. Use **Show status** to verify the result.
+7. Use the matching disable option to restore the previous configuration.
+
+After controller mode has been enabled once, start the tunnel on demand with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Start
+```
+
+Use `-Action Stop` to stop only the current tunnel process without removing the controller configuration.
 
 ### Safety and compatibility
 
 - The listener binds only to `127.0.0.1`.
-- Controller mode changes only its marked hosts line and its own startup entry.
+- Controller mode changes only its marked hosts line and uses an on-demand local tunnel; it creates no automatic startup mechanism.
 - Host mode preserves newer user edits instead of overwriting them during rollback.
 - No credentials, tokens, logs, backups, or machine-specific paths are included in this repository.
 - These workarounds may stop working after a desktop app update because they are not documented OpenAI proxy modes.

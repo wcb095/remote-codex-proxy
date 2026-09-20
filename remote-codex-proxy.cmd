@@ -11,8 +11,10 @@ echo   1. Enable controller forced mode / 开启控制端强制模式
 echo   2. Disable controller forced mode / 撤销控制端强制模式
 echo   3. Enable host light mode / 开启被控端轻量模式
 echo   4. Disable host light mode / 撤销被控端轻量模式
-echo   5. Show status / 检查状态
-echo   6. Run self-test / 执行自检
+echo   5. Start controller tunnel now / 立即启动控制端隧道
+echo   6. Stop controller tunnel / 停止控制端隧道
+echo   7. Show status / 检查状态
+echo   8. Run self-test / 执行自检
 echo   0. Exit / 退出
 echo ================================================================
 set "choice="
@@ -22,8 +24,10 @@ if "%choice%"=="1" call :run EnableController
 if "%choice%"=="2" call :run DisableController
 if "%choice%"=="3" call :run EnableHost
 if "%choice%"=="4" call :run DisableHost
-if "%choice%"=="5" call :run Status
-if "%choice%"=="6" call :run SelfTest
+if "%choice%"=="5" call :run Start
+if "%choice%"=="6" call :run Stop
+if "%choice%"=="7" call :run Status
+if "%choice%"=="8" call :run SelfTest
 if "%choice%"=="0" exit /b 0
 goto menu
 
