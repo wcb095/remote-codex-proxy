@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 
 $ToolName = 'CodexRemoteSystemProxy'
+$ExpectedVersion = '2.2.0'
 $SourceScript = Join-Path $PSScriptRoot 'CodexRemoteProxy.ps1'
 $SourceTunnel = Join-Path $PSScriptRoot 'tunnel.cjs'
 $StateRoot = Join-Path $env:LOCALAPPDATA $ToolName
@@ -14,8 +15,34 @@ $BackupRoot = Join-Path $StateRoot 'backups'
 $InstalledScript = Join-Path $InstallRoot 'CodexRemoteProxy.ps1'
 $InstalledTunnel = Join-Path $InstallRoot 'tunnel.cjs'
 
+function Get-ToolVersionLine([string]$Path) {
+    return Select-String -LiteralPath $Path -Pattern '^\s*\$ToolVersion\s*=' | Select-Object -First 1
+}
+
+function Assert-UnifiedScript([string]$Path, [string]$Label) {
+    $versionLine = Get-ToolVersionLine $Path
+    if (-not $versionLine) {
+        throw "$Label does not expose ToolVersion: $Path"
+    }
+
+    $expectedPattern = "^\s*\$ToolVersion\s*=\s*'$([regex]::Escape($ExpectedVersion))'\s*$"
+    if ($versionLine.Line -notmatch $expectedPattern) {
+        throw "Unexpected $Label version: $($versionLine.Line)"
+    }
+
+    $unifiedAction = Select-String -LiteralPath $Path -SimpleMatch "'StartUnified'" | Select-Object -First 1
+    if (-not $unifiedAction) {
+        throw "$Label does not contain the StartUnified action: $Path"
+    }
+
+    return $versionLine
+}
+
 if (-not (Test-Path -LiteralPath $SourceScript)) { throw "Missing source file: $SourceScript" }
 if (-not (Test-Path -LiteralPath $SourceTunnel)) { throw "Missing source file: $SourceTunnel" }
+
+$sourceVersionLine = Assert-UnifiedScript $SourceScript 'Source script'
+Write-Host "[Remote Codex Proxy] Source verified: $($sourceVersionLine.Line.Trim())"
 
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
@@ -31,13 +58,8 @@ if (Test-Path -LiteralPath $InstalledTunnel) {
 Copy-Item -LiteralPath $SourceScript -Destination $InstalledScript -Force
 Copy-Item -LiteralPath $SourceTunnel -Destination $InstalledTunnel -Force
 
-$versionLine = Select-String -LiteralPath $InstalledScript -Pattern "\$ToolVersion\s*=\s*'([^']+)'" | Select-Object -First 1
-if (-not $versionLine) { throw 'Installed script does not expose ToolVersion.' }
-if ($versionLine.Line -notmatch "'2\.2\.0'") {
-    throw "Unexpected installed version: $($versionLine.Line)"
-}
-
-Write-Host "[Remote Codex Proxy] Installed unified launcher: $($versionLine.Line.Trim())"
+$installedVersionLine = Assert-UnifiedScript $InstalledScript 'Installed script'
+Write-Host "[Remote Codex Proxy] Installed unified launcher: $($installedVersionLine.Line.Trim())"
 
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $InstalledScript -Action SelfTest
 if ($LASTEXITCODE -ne 0) { throw "SelfTest failed with exit code $LASTEXITCODE." }
