@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('EnableController', 'DisableController', 'EnableHost', 'DisableHost', 'Status', 'Start', 'Stop', 'SelfTest')]
+    [ValidateSet('EnableController', 'DisableController', 'EnableHost', 'DisableHost', 'Status', 'Start', 'StartUnified', 'Stop', 'SelfTest')]
     [string]$Action = 'Status',
     [switch]$Interactive,
     [switch]$Elevated
@@ -8,7 +8,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 
-$ToolVersion = '2.1.0'
+$ToolVersion = '2.2.0'
 $ToolName = 'CodexRemoteSystemProxy'
 $TargetHost = 'chatgpt.com'
 $TargetPort = 443
@@ -22,6 +22,12 @@ $HostStateFile = Join-Path $StateRoot 'light-state.json'
 $PidFile = Join-Path $StateRoot 'tunnel.pid'
 $StdoutLog = Join-Path $StateRoot 'tunnel.stdout.log'
 $StderrLog = Join-Path $StateRoot 'tunnel.stderr.log'
+$BridgeHost = '127.0.0.1'
+$BridgePort = 17841
+$BridgeHome = Join-Path $env:USERPROFILE '.codex-chatgpt-web'
+$BridgePidFile = Join-Path $StateRoot 'codex-chatgpt-web.pid'
+$BridgeStdoutLog = Join-Path $StateRoot 'codex-chatgpt-web.stdout.log'
+$BridgeStderrLog = Join-Path $StateRoot 'codex-chatgpt-web.stderr.log'
 $HostsPath = Join-Path $env:WINDIR 'System32\drivers\etc\hosts'
 $ConfigPath = Join-Path $env:USERPROFILE '.codex\config.toml'
 $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
@@ -170,6 +176,110 @@ function Test-ManagedProcess($ProcessRecord) {
     }
 }
 
+function Get-BridgeListener {
+    return Get-NetTCPConnection -State Listen -LocalAddress $BridgeHost -LocalPort $BridgePort -ErrorAction SilentlyContinue | Select-Object -First 1
+}
+
+function Test-ManagedBridgeProcess($ProcessRecord) {
+    if (-not $ProcessRecord) { return $false }
+    $commandLine = [string]$ProcessRecord.CommandLine
+    if (-not [string]::IsNullOrWhiteSpace($commandLine)) {
+        return ($commandLine -match '(?i)\.codex-chatgpt-web[\\/].*[\\/]app[\\/]cli\.js') -and
+               ($commandLine -match '(?i)(?:^|\s)serve(?:\s|$)')
+    }
+    if ([string]$ProcessRecord.Name -ne 'bun.exe' -or -not (Test-Path -LiteralPath $BridgePidFile)) { return $false }
+    try {
+        return [int](Get-Content -LiteralPath $BridgePidFile -Raw).Trim() -eq [int]$ProcessRecord.ProcessId
+    } catch {
+        return $false
+    }
+}
+
+function Find-CodexChatGptWebRuntime {
+    $versionsRoot = Join-Path $BridgeHome 'versions'
+    if (-not (Test-Path -LiteralPath $versionsRoot)) {
+        throw "codex-chatgpt-web is not installed at $BridgeHome."
+    }
+
+    $candidates = @(
+        Get-ChildItem -LiteralPath $versionsRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $bunPath = Join-Path $_.FullName 'runtime\bun.exe'
+            $cliPath = Join-Path $_.FullName 'app\cli.js'
+            if ((Test-Path -LiteralPath $bunPath) -and (Test-Path -LiteralPath $cliPath)) {
+                $versionText = '0.0.0'
+                if ($_.Name -match '^(?<version>\d+\.\d+\.\d+)') { $versionText = $matches['version'] }
+                try { $parsedVersion = [version]$versionText } catch { $parsedVersion = [version]'0.0.0' }
+                [pscustomobject]@{
+                    Root = $_.FullName
+                    Bun = $bunPath
+                    Cli = $cliPath
+                    Version = $parsedVersion
+                    LastWriteTime = $_.LastWriteTimeUtc
+                }
+            }
+        }
+    )
+
+    if ($candidates.Count -eq 0) {
+        throw "No usable codex-chatgpt-web runtime was found under $versionsRoot."
+    }
+
+    return $candidates |
+        Sort-Object @{ Expression = { $_.Version }; Descending = $true }, @{ Expression = { $_.LastWriteTime }; Descending = $true } |
+        Select-Object -First 1
+}
+
+function Start-CodexChatGptWebBridge {
+    $listener = Get-BridgeListener
+    if ($listener) {
+        $processRecord = Get-ProcessRecord ([int]$listener.OwningProcess)
+        if (Test-ManagedBridgeProcess $processRecord) {
+            Set-Content -LiteralPath $BridgePidFile -Value $listener.OwningProcess -Encoding ASCII
+            Write-Step ("codex-chatgpt-web bridge is already running on " + $BridgeHost + ":" + $BridgePort + ".")
+            return
+        }
+        throw ($BridgeHost + ":" + $BridgePort + " is already used by unrelated PID " + $listener.OwningProcess + ".")
+    }
+
+    $runtime = Find-CodexChatGptWebRuntime
+    New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
+    Remove-Item -LiteralPath $BridgeStdoutLog -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $BridgeStderrLog -Force -ErrorAction SilentlyContinue
+
+    $oldWebHome = [Environment]::GetEnvironmentVariable('CODEX_CHATGPT_WEB_HOME', 'Process')
+    $oldCodexHome = [Environment]::GetEnvironmentVariable('CODEX_HOME', 'Process')
+    try {
+        $env:CODEX_CHATGPT_WEB_HOME = $BridgeHome
+        if ([string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
+            $env:CODEX_HOME = Join-Path $env:USERPROFILE '.codex'
+        }
+        $arguments = '"' + $runtime.Cli + '" serve'
+        $process = Start-Process -FilePath $runtime.Bun -ArgumentList $arguments -WorkingDirectory $runtime.Root -WindowStyle Hidden -RedirectStandardOutput $BridgeStdoutLog -RedirectStandardError $BridgeStderrLog -PassThru
+    } finally {
+        [Environment]::SetEnvironmentVariable('CODEX_CHATGPT_WEB_HOME', $oldWebHome, 'Process')
+        [Environment]::SetEnvironmentVariable('CODEX_HOME', $oldCodexHome, 'Process')
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(12)
+    do {
+        Start-Sleep -Milliseconds 200
+        if ($process.HasExited) {
+            $details = if (Test-Path -LiteralPath $BridgeStderrLog) { Get-Content -LiteralPath $BridgeStderrLog -Raw } else { 'No error log was produced.' }
+            throw "codex-chatgpt-web exited during startup. $details"
+        }
+        $listener = Get-BridgeListener
+    } while (-not $listener -and [DateTime]::UtcNow -lt $deadline)
+
+    if (-not $listener) { throw ("codex-chatgpt-web did not start listening on " + $BridgeHost + ":" + $BridgePort + " within twelve seconds.") }
+    $processRecord = Get-ProcessRecord ([int]$listener.OwningProcess)
+    if (-not (Test-ManagedBridgeProcess $processRecord)) {
+        throw ($BridgeHost + ":" + $BridgePort + " became occupied by an unexpected process (PID " + $listener.OwningProcess + ").")
+    }
+
+    Set-Content -LiteralPath $BridgePidFile -Value $listener.OwningProcess -Encoding ASCII
+    Write-Step ("codex-chatgpt-web bridge started from " + $runtime.Root + " on " + $BridgeHost + ":" + $BridgePort + ".")
+}
+
 function Stop-Tunnel {
     $candidatePids = New-Object Collections.Generic.List[int]
     if (Test-Path -LiteralPath $PidFile) {
@@ -233,6 +343,34 @@ function Start-Tunnel {
 
     if (-not $listener) { throw 'The tunnel did not start listening within six seconds.' }
     Set-Content -LiteralPath $PidFile -Value $process.Id -Encoding ASCII
+}
+
+function Start-UnifiedRemoteControl {
+    if (-not (Test-Path -LiteralPath $ControllerStateFile)) {
+        throw 'Controller forced mode is not configured. Run -Action EnableController once before using unified start.'
+    }
+
+    Remove-StartupValue
+    Write-Step 'Starting controller tunnel first...'
+    Start-Tunnel
+    if (-not (Test-TlsTunnel)) {
+        throw 'Controller tunnel is listening, but TLS verification through the system proxy failed.'
+    }
+
+    Write-Step 'Starting codex-chatgpt-web bridge...'
+    Start-CodexChatGptWebBridge
+
+    $bridgeListener = Get-BridgeListener
+    $bridgeReady = $false
+    if ($bridgeListener) {
+        $bridgeReady = Test-ManagedBridgeProcess (Get-ProcessRecord ([int]$bridgeListener.OwningProcess))
+    }
+    if (-not $bridgeReady) {
+        throw ("codex-chatgpt-web bridge verification failed on " + $BridgeHost + ":" + $BridgePort + ".")
+    }
+
+    Write-Step ("Unified remote-control stack is ready: tunnel " + $ListenHost + ":" + $ListenPort + " + bridge " + $BridgeHost + ":" + $BridgePort + ".")
+    Write-Step 'Everything is on-demand; no login startup entry, scheduled task, or Windows service was created.'
 }
 
 function Test-TlsTunnel {
@@ -663,6 +801,9 @@ function Show-Status {
     $managedListener = $false
     if ($listener) { $managedListener = Test-ManagedProcess (Get-ProcessRecord ([int]$listener.OwningProcess)) }
     $tlsReady = if ($managedListener) { Test-TlsTunnel } else { $false }
+    $bridgeListener = Get-BridgeListener
+    $managedBridge = $false
+    if ($bridgeListener) { $managedBridge = Test-ManagedBridgeProcess (Get-ProcessRecord ([int]$bridgeListener.OwningProcess)) }
     $tunUp = [bool](Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | Where-Object { ($_.Name -match '^(Meta|Mihomo|Clash)') -and $_.Status -eq 'Up' } | Select-Object -First 1)
     $userProxy = [Environment]::GetEnvironmentVariable('HTTPS_PROXY', 'User')
     $featureDisplay = '<missing>'
@@ -680,6 +821,7 @@ function Show-Status {
         [pscustomobject]@{ Check = 'Controller hosts'; Status = if ($hostsInstalled) { 'OK' } else { 'OFF' }; Details = $TargetHost },
         [pscustomobject]@{ Check = 'Controller startup'; Status = if ($startupValue) { 'REMOVE' } else { 'OFF' }; Details = if ($startupValue) { [string]$startupValue } else { 'On-demand only' } },
         [pscustomobject]@{ Check = 'Controller tunnel'; Status = if ($managedListener -and $tlsReady) { 'OK' } elseif ($managedListener) { 'TLS FAILED' } else { 'OFF' }; Details = "$ListenHost`:$ListenPort" },
+        [pscustomobject]@{ Check = 'ChatGPT Web bridge'; Status = if ($managedBridge) { 'OK' } elseif ($bridgeListener) { 'PORT CONFLICT' } else { 'OFF' }; Details = ($BridgeHost + ':' + $BridgePort) },
         [pscustomobject]@{ Check = 'Host HTTPS_PROXY'; Status = if ($userProxy) { 'SET' } else { 'OFF' }; Details = [string]$userProxy },
         [pscustomobject]@{ Check = 'Host feature'; Status = if ($featureDisplay -match '=\s*true') { 'SET' } else { 'OFF' }; Details = $featureDisplay },
         [pscustomobject]@{ Check = 'Host state'; Status = if (Test-Path -LiteralPath $HostStateFile) { 'ON' } else { 'OFF' }; Details = $HostStateFile }
@@ -776,6 +918,7 @@ try {
             Start-Tunnel
             Write-Step 'Controller tunnel started on demand. No login startup entry was created.'
         }
+        'StartUnified' { Start-UnifiedRemoteControl }
         'Stop' { Stop-Tunnel }
         'SelfTest' { Invoke-SelfTest }
     }
