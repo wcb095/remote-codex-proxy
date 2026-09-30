@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('EnableController', 'DisableController', 'EnableHost', 'DisableHost', 'Status', 'Start', 'StartUnified', 'Stop', 'SelfTest')]
+    [ValidateSet('EnableController', 'DisableController', 'EnableHost', 'DisableHost', 'Status', 'Start', 'StartTunnel', 'StartUnified', 'Stop', 'SelfTest')]
     [string]$Action = 'Status',
     [switch]$Interactive,
     [switch]$Elevated
@@ -913,7 +913,8 @@ try {
         'EnableHost' { Enable-HostMode }
         'DisableHost' { Disable-HostMode }
         'Status' { Show-Status }
-        'Start' {
+        'Start' { Start-UnifiedRemoteControl }
+        'StartTunnel' {
             Remove-StartupValue
             Start-Tunnel
             Write-Step 'Controller tunnel started on demand. No login startup entry was created.'
