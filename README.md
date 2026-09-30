@@ -272,6 +272,7 @@ This starts and verifies the controller tunnel first, then reuses or launches th
 |---|---|
 | `remote-codex-proxy.cmd` | Bilingual interactive launcher |
 | `CodexRemoteProxy.ps1` | Controller and host configuration, unified startup, status, rollback, and self-test |
+| `AGENTS.remote-control.example.md` | Codex trigger example so phrases like “远程控制” call `StartUnified` |
 | `tunnel.cjs` | Loopback-only TLS byte tunnel used by controller forced mode |
 | `README.md` | Chinese and English documentation |
 | `LICENSE` | MIT License |
