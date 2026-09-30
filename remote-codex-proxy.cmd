@@ -25,8 +25,8 @@ if "%choice%"=="1" call :run EnableController
 if "%choice%"=="2" call :run DisableController
 if "%choice%"=="3" call :run EnableHost
 if "%choice%"=="4" call :run DisableHost
-if "%choice%"=="5" call :run Start
-if "%choice%"=="6" call :run StartUnified
+if "%choice%"=="5" call :run StartTunnel
+if "%choice%"=="6" call :run Start
 if "%choice%"=="7" call :run Stop
 if "%choice%"=="8" call :run Status
 if "%choice%"=="9" call :run SelfTest
