@@ -100,13 +100,13 @@ respect_system_proxy = true # CodexRemoteProxyTool
 7. 使用菜单中的“检查状态”确认结果；
 8. 需要恢复时，选择对应模式的撤销项。
 
-控制端首次启用后，后续需要连接时只需运行：
+控制端首次启用后，后续需要完整远控栈时只需运行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Start
 ```
 
-`Start` 只启动当前会话所需的本地隧道，不会创建登录启动项。完全不再需要时可使用 `-Action Stop` 暂停隧道，或使用 `DisableController` 同时撤销 hosts 等控制端配置。
+`Start` 会统一启动并验证 443 tunnel 与 17841 `codex-chatgpt-web` bridge；`StartUnified` 是等价别名。只需要本地 tunnel 时使用 `-Action StartTunnel`。这些动作都不会创建登录启动项。完全不再需要时可使用 `-Action Stop` 暂停隧道，或使用 `DisableController` 同时撤销 hosts 等控制端配置。
 
 也可以直接使用 PowerShell：
 
@@ -115,6 +115,7 @@ powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Start
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action EnableController
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Start
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action StartUnified
+powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action StartTunnel
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Stop
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action DisableController
 
@@ -240,13 +241,7 @@ Completely exit Codex, including background processes, and restart it after enab
 6. Use **Show status** to verify the result.
 7. Use the matching disable option to restore the previous configuration.
 
-After controller mode has been enabled once, start the tunnel on demand with:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Start
-```
-
-Use `-Action Stop` to stop only the current tunnel process without removing the controller configuration.
+After controller mode has been enabled once, `-Action Start` launches the unified stack (443 tunnel + 17841 bridge). `-Action StartUnified` is an equivalent alias. Use `-Action StartTunnel` when only the controller tunnel is desired, and `-Action Stop` to stop the tunnel without removing controller configuration.
 
 ### Unified on-demand start
 
