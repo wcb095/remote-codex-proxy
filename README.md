@@ -96,7 +96,7 @@ respect_system_proxy = true # CodexRemoteProxyTool
 3. 根据电脑角色选择控制端强制模式或被控端轻量模式；
 4. 控制端模式修改 hosts 时会出现 UAC，请核对后确认；
 5. 被控端轻量模式启用后，完全退出并重新启动 Codex；
-6. 以后需要远控时，选择“立即启动控制端隧道”；不使用时可选择“停止控制端隧道”；
+6. 以后如果同时需要远控 tunnel 和 codex-chatgpt-web，可选择“启动完整远控栈”；只需要 tunnel 时仍可选择“立即启动控制端隧道”；
 7. 使用菜单中的“检查状态”确认结果；
 8. 需要恢复时，选择对应模式的撤销项。
 
@@ -114,6 +114,7 @@ powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Start
 # 控制端强制模式
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action EnableController
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Start
+powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action StartUnified
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Stop
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action DisableController
 
@@ -125,6 +126,33 @@ powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action DisableH
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Status
 powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action SelfTest
 ```
+
+
+
+### 一句话启动完整远控栈
+
+如果控制端已经完成过一次 `EnableController`，并且本机已经安装 `codex-chatgpt-web`，可以直接运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action StartUnified
+```
+
+`StartUnified` 会按以下顺序执行：
+
+```text
+1. 检查并启动 127.0.0.1:443 控制端 tunnel
+2. 验证 tunnel 的 TLS 路径
+3. 检查 127.0.0.1:17841
+4. 若未启动，自动发现 ~/.codex-chatgpt-web/versions 下最新可用运行时
+5. 启动 codex-chatgpt-web serve
+6. 再次验证 443 与 17841
+```
+
+之所以先启动 443，再启动 17841，是因为控制端强制模式会保留 `chatgpt.com -> 127.0.0.1` 的 hosts 映射；如果 tunnel 尚未起来，先启动 Web bridge 可能导致它访问 ChatGPT 时撞到一个尚未就绪的本地 443。
+
+这个统一入口仍然是按需启动：不会创建登录启动项、计划任务或 Windows 服务。若 443 或 17841 已经由本工具对应进程监听，会直接复用；若端口被无关进程占用，会停止并报告 PID，而不会杀掉无关进程。
+
+`codex-chatgpt-web` 的安装目录按 `~/.codex-chatgpt-web/versions` 自动发现，不依赖固定版本号，因此升级到新版本后不需要改这个脚本。
 
 ### 本地状态和备份
 
@@ -220,6 +248,16 @@ powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action Start
 
 Use `-Action Stop` to stop only the current tunnel process without removing the controller configuration.
 
+### Unified on-demand start
+
+After controller mode has been enabled once and `codex-chatgpt-web` is installed, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\CodexRemoteProxy.ps1 -Action StartUnified
+```
+
+This starts and verifies the controller tunnel first, then reuses or launches the local `codex-chatgpt-web serve` bridge on `127.0.0.1:17841`. The runtime is discovered from the installed `~/.codex-chatgpt-web/versions` directory, so the script is not tied to a specific launcher version. Existing managed listeners are reused; unrelated port owners are reported instead of terminated. The unified action remains fully on-demand and creates no login startup entry, scheduled task, or Windows service.
+
 ### Safety and compatibility
 
 - The listener binds only to `127.0.0.1`.
@@ -233,7 +271,7 @@ Use `-Action Stop` to stop only the current tunnel process without removing the 
 | File | Purpose |
 |---|---|
 | `remote-codex-proxy.cmd` | Bilingual interactive launcher |
-| `CodexRemoteProxy.ps1` | Controller and host configuration, status, rollback, and self-test |
+| `CodexRemoteProxy.ps1` | Controller and host configuration, unified startup, status, rollback, and self-test |
 | `tunnel.cjs` | Loopback-only TLS byte tunnel used by controller forced mode |
 | `README.md` | Chinese and English documentation |
 | `LICENSE` | MIT License |
