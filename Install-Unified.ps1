@@ -25,9 +25,14 @@ function Assert-UnifiedScript([string]$Path, [string]$Label) {
         throw "$Label does not expose ToolVersion: $Path"
     }
 
-    $expectedPattern = "^\s*\$ToolVersion\s*=\s*'$([regex]::Escape($ExpectedVersion))'\s*$"
-    if ($versionLine.Line -notmatch $expectedPattern) {
-        throw "Unexpected $Label version: $($versionLine.Line)"
+    $versionPattern = '^\s*\$ToolVersion\s*=\s*''([^'']+)''\s*$'
+    if ($versionLine.Line -notmatch $versionPattern) {
+        throw "Cannot parse $Label version line: $($versionLine.Line)"
+    }
+
+    $actualVersion = $Matches[1]
+    if ($actualVersion -ne $ExpectedVersion) {
+        throw "Unexpected $Label version: $actualVersion (expected $ExpectedVersion)"
     }
 
     $unifiedAction = Select-String -LiteralPath $Path -SimpleMatch "'StartUnified'" | Select-Object -First 1
