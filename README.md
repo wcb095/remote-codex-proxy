@@ -1,5 +1,9 @@
 # Remote Codex Proxy
 
+> **安全更新（2026-10-01）：旧控制端强制模式已停用。** 永久 hosts 映射可能在隧道随重启停止后阻断普通 ChatGPT 访问。脚本现已拒绝启动旧控制端或重新添加映射，仍可用 `DisableController` 清理旧配置。下文的控制端说明仅作为历史记录，不应重新部署；被控端轻量模式保留。不改 hosts 的原生远控替代方案尚未验证。
+>
+> **Safety update (2026-10-01): legacy controller mode is retired.** Its persistent loopback hosts mapping may break normal ChatGPT access after reboot. Controller enable/start actions and adding the hosts mapping are now blocked; `DisableController` remains available for cleanup. Controller instructions below are historical. Host light mode is retained. A hosts-free replacement for native Remote Control is not yet verified.
+
 Windows helper for routing Codex Remote Control through a Clash-compatible HTTP system proxy without requiring Clash TUN.
 
 用于在 Windows 上让 Codex 远程控制通过 Clash 兼容的 HTTP 系统代理连接，并尽量避免依赖 Clash TUN。

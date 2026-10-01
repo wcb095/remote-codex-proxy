@@ -188,6 +188,7 @@ function Stop-Tunnel {
 }
 
 function Start-Tunnel {
+    throw 'Legacy hosts-based controller mode is retired because its persistent chatgpt.com mapping can break normal browsing after reboot. No tunnel or hosts mapping was started. DisableController remains available for cleanup.'
     $state = Read-JsonState $ControllerStateFile
     $listener = Get-Listener
     if ($listener) {
@@ -275,6 +276,7 @@ function Remove-ManagedMappings([string]$Text) {
 }
 
 function Set-HostsMapping([bool]$Enabled) {
+    if ($Enabled) { throw 'Refusing to map chatgpt.com to loopback: hosts-based controller mode is retired.' }
     $bytes = [IO.File]::ReadAllBytes($HostsPath)
     $oneByte = [Text.Encoding]::GetEncoding(28591)
     $original = $oneByte.GetString($bytes)
@@ -489,6 +491,7 @@ function Get-EnvironmentRestoreDecision {
 }
 
 function Enable-ControllerMode {
+    throw 'Hosts-based controller mode is retired. Do not re-enable it. Use DisableController only to remove legacy settings.'
     if (Test-HostConfigured) { throw 'Host light mode is active. Disable it before enabling controller forced mode.' }
     Write-Step 'Reading the Windows System Proxy configuration...'
     $proxy = Get-SystemProxyEndpoint
@@ -759,7 +762,7 @@ function Invoke-SelfTest {
 
 $exitCode = 0
 try {
-    if (($Action -eq 'EnableController' -or $Action -eq 'DisableController') -and -not (Test-Administrator)) {
+    if ($Action -eq 'DisableController' -and -not (Test-Administrator)) {
         if ($Elevated) { throw 'Administrator elevation did not take effect.' }
         Request-Administrator
         exit 0
